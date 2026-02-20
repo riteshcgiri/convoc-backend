@@ -11,7 +11,7 @@ const mailFormat = require('../../utils/mailFormat.js')
 
 
 const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "15m" });
+    return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "1d" });
 }
 
 const signUp = async (req, res) => {
@@ -246,8 +246,18 @@ const resetPassword = async (req, res) => {
   });
 };
 
+const getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("-password");
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch user" });
+  }
+};
 
 
 
 
-module.exports = { signIn, signUp, verifyOTP, resendOTP, requestPasswordReset, verifyResetOtp, resetPassword }
+
+
+module.exports = { signIn, signUp, verifyOTP, resendOTP, requestPasswordReset, verifyResetOtp, resetPassword, getMe }
