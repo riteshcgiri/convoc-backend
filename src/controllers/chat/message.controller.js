@@ -221,5 +221,30 @@ const deleteForEveryone = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, };
+const searchMessages = async (req, res) => {
+  try {
+    const { q } = req.query;
+    const currentUserId = req.user.id;
+    if (!q || q.trim() === "")
+      return res.json([]);
+    const userChats = await Chat.find({ users: currentUserId });
+    const messages = await Message.find({
+      chat: { $in: userChats.map((c) => c._id) },
+      isDeletedForEveryone: false,
+      deletedFor: { $ne: currentUserId },
+      content: { $regex: q, $options: "i" },
+    }).populate("sender", "name username avatar")
+      .populate("chat", "isGroupChat chatName users")
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+      res.json(messages);
+
+  }
+  catch (error) {
+    res.status(500).json({ message: error || 'failed to search message' })
+  }
+}
+
+module.exports = { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, searchMessages, };
 

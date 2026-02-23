@@ -17,15 +17,36 @@ const io = new Server(server, {
 
 app.set("io", io);
 
+// Track online users { userId: socketId }
+const onlineUsers = new Map();
+
 io.on("connection", (socket) => {
+
   console.log("Socket connected:", socket.id);
 
   socket.on("setup", async (userId) => {
     socket.join(userId);
+    socket.userId = userId; // store on socket for disconnect
 
+    onlineUsers.set(userId, socket.id);
+
+    // Notify all chat members this user is online
     try {
       const chats = await Chat.find({ users: userId });
+      chats.forEach((chat) => {
+        chat.users.forEach((memberId) => {
+          if (memberId.toString() !== userId) {
+            io.to(memberId.toString()).emit("user_online", userId);
+          }
+        });
+      });
+    } catch (err) {
+      console.error("Error emitting user_online:", err);
+    }
 
+    // Mark undelivered messages as delivered
+    try {
+      const chats = await Chat.find({ users: userId });
       for (const chat of chats) {
         const updated = await Message.updateMany(
           {
@@ -37,14 +58,12 @@ io.on("connection", (socket) => {
         );
 
         if (updated.modifiedCount > 0) {
-          // Get the messages we just updated to find their senders
-          const updatedMessages = await Message.find({
+          const senderIds = await Message.find({
             chat: chat._id,
             deliveredTo: userId,
           }).distinct("sender");
 
-          // Notify each sender in their personal room
-          updatedMessages.forEach((senderId) => {
+          senderIds.forEach((senderId) => {
             io.to(senderId.toString()).emit("message_status_updated", {
               chatId: chat._id.toString(),
               userId,
@@ -54,7 +73,7 @@ io.on("connection", (socket) => {
         }
       }
     } catch (err) {
-      console.error("Error on setup delivery:", err);
+      console.error("Error marking delivered on setup:", err);
     }
   });
 
@@ -85,9 +104,7 @@ io.on("connection", (socket) => {
 
         senderIds.forEach((senderId) => {
           io.to(senderId.toString()).emit("message_status_updated", {
-            chatId,
-            userId,
-            type: "delivered",
+            chatId, userId, type: "delivered",
           });
         });
       }
@@ -97,8 +114,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("message_read", async ({ chatId, userId }) => {
-
-    console.log("message_read received on server", { chatId, userId });
     try {
       const updated = await Message.updateMany(
         { chat: chatId, sender: { $ne: userId }, readBy: { $ne: userId } },
@@ -111,11 +126,8 @@ io.on("connection", (socket) => {
         }).distinct("sender");
 
         senderIds.forEach((senderId) => {
-           console.log("emitting message_status_updated to sender:", senderId.toString());
           io.to(senderId.toString()).emit("message_status_updated", {
-            chatId,
-            userId,
-            type: "read",
+            chatId, userId, type: "read",
           });
         });
       }
@@ -123,32 +135,51 @@ io.on("connection", (socket) => {
       console.error("Error in message_read:", err);
     }
   });
-
-  socket.on("message_read", async ({ chatId, userId }) => {
+  socket.on("get_online_users", async (userId) => {
     try {
-      const updated = await Message.updateMany(
-        {
-          chat: chatId,
-          sender: { $ne: userId },
-          readBy: { $ne: userId },
-        },
-        { $addToSet: { readBy: userId } }
+      const chats = await Chat.find({ users: userId });
+      const contactIds = new Set();
+
+      chats.forEach((chat) => {
+        chat.users.forEach((memberId) => {
+          if (memberId.toString() !== userId) {
+            contactIds.add(memberId.toString());
+          }
+        });
+      });
+
+      // Filter which contacts are currently online
+      const onlineContactIds = [...contactIds].filter((id) =>
+        onlineUsers.has(id)
       );
 
-      if (updated.modifiedCount > 0) {
-        io.to(chatId).emit("message_status_updated", {
-          chatId,
-          userId,
-          type: "read",
-        });
-      }
+      socket.emit("online_users_list", onlineContactIds);
     } catch (err) {
-      console.error("Error in message_read:", err);
+      console.error("Error in get_online_users:", err);
     }
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
+    const userId = socket.userId;
     console.log("Socket disconnected:", socket.id);
+
+    if (!userId) return;
+
+    onlineUsers.delete(userId);
+
+    // Notify all chat members this user is offline
+    try {
+      const chats = await Chat.find({ users: userId });
+      chats.forEach((chat) => {
+        chat.users.forEach((memberId) => {
+          if (memberId.toString() !== userId) {
+            io.to(memberId.toString()).emit("user_offline", userId);
+          }
+        });
+      });
+    } catch (err) {
+      console.error("Error emitting user_offline:", err);
+    }
   });
 });
 

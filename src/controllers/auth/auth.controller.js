@@ -1,12 +1,12 @@
 const crypto = require('crypto');
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
-const generateUsername = require('../../utils/generateUsername')
 const User = require('../../models/User.model.js');
-const generateOTP = require('../../utils/generateOTP');
 const sendEmail = require('../../utils/sendEmail');
-const emailTemplate = require('../../utils/emailTemplate')
+const generateOTP = require('../../utils/generateOTP');
 const mailFormat = require('../../utils/mailFormat.js')
+const emailTemplate = require('../../utils/emailTemplate')
+const generateUsername = require('../../utils/generateUsername')
 
 
 
@@ -15,7 +15,7 @@ const generateToken = (id) => {
 }
 
 const signUp = async (req, res) => {
-    const { name, email, password, phone, tnc } = req.body;
+    const { name, email, password, phone, tnc, avatar } = req.body;
 
     if (!name || !email || !password || !phone)
         return res.status(400).json({ message: 'All fields required' });
@@ -74,6 +74,7 @@ const signUp = async (req, res) => {
         tncAcceptedAt: Date.now(),
         otp: hashedOtp,
         otpExpires: Date.now() + 10 * 60 * 1000,
+        avatar
     })
 
     await sendEmail(
@@ -218,46 +219,74 @@ const verifyResetOtp = async (req, res) => {
 }
 
 const resetPassword = async (req, res) => {
-  const { email, password } = req.body;
+    const { email, password } = req.body;
 
-  const user = await User.findOne({ $or: [{ email }, { username: email }],});
+    const user = await User.findOne({ $or: [{ email }, { username: email }], });
 
-  if (!user || !user.resetSession)
-    return res.status(400).json({ message: "Session expired" });
+    if (!user || !user.resetSession)
+        return res.status(400).json({ message: "Session expired" });
 
-  const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-  user.password = hashedPassword;
-  user.resetOtp = undefined;
-  user.resetOtpExpires = undefined;
-  user.resetSession = false;
+    user.password = hashedPassword;
+    user.resetOtp = undefined;
+    user.resetOtpExpires = undefined;
+    user.resetSession = false;
 
-  await user.save();
+    await user.save();
 
-  sendEmail(
-    user.email,
-    "Password Changed Successfully",
-    mailFormat({title : "CONVOC - Password Changed Request", subtitle: "Password Changed Successfully", description : "Your CONCOV password has been successfully changed, If this Request is done by you kindly ignore this mail, otherwise visit site or contact us", footerNote: 'if this request id done by you, you can simply ignore this messagge.'})
-  ).catch(console.error);
+    sendEmail(
+        user.email,
+        "Password Changed Successfully",
+        mailFormat({ title: "CONVOC - Password Changed Request", subtitle: "Password Changed Successfully", description: "Your CONCOV password has been successfully changed, If this Request is done by you kindly ignore this mail, otherwise visit site or contact us", footerNote: 'if this request id done by you, you can simply ignore this messagge.' })
+    ).catch(console.error);
 
-  res.json({
-    message: "Password changed successfully",
-    token: generateToken(user._id),
-  });
+    res.json({
+        message: "Password changed successfully",
+        token: generateToken(user._id),
+    });
 };
 
 const getMe = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select("-password");
-    res.json(user);
-  } catch (error) {
-    res.status(500).json({ message: "Failed to fetch user" });
-  }
+    try {
+        const user = await User.findById(req.user.id).select("-password");
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ message: "Failed to fetch user" });
+    }
 };
 
+const searchUsers = async (req, res) => {
+    try {
+        const q = req.query.q?.toString();
+        const currentUserId = req.user.id;
+
+        if (!q || q.trim() === "")
+            return res.json([])
+
+        const phoneQuery = Number(q);
+        const phoneFilter = !isNaN(phoneQuery) ? [{ phone: phoneQuery }] : [];
+
+        const users = await User.find({
+            _id: { $ne: currentUserId },
+            isVerified: true,
+            $or: [
+                { name: { $regex: q, $options: "i" } },
+                { username: { $regex: q, $options: "i" } },
+                { email : { $regex: q, $options: "i" } },
+                ...phoneFilter,
+            ],
+        }).select("name username avatar phone status").limit(10);
+
+        res.json(users);
+    }
+    catch (error) {
+        res.status(500).json({ message: error || "Search failed" });
+    }
+}
 
 
 
 
 
-module.exports = { signIn, signUp, verifyOTP, resendOTP, requestPasswordReset, verifyResetOtp, resetPassword, getMe }
+module.exports = { signIn, signUp, verifyOTP, resendOTP, requestPasswordReset, verifyResetOtp, resetPassword, getMe, searchUsers }

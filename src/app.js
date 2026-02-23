@@ -21,5 +21,8 @@ app.use("/api/auth", authRoutes)
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
 app.get("/", (req, res) => res.send("App working pretty fine"))
-
+app.use((err, req, res, next) => {
+  console.error("Global error:", err);
+  res.status(500).json({ message: err.message });
+});
 module.exports = app;   

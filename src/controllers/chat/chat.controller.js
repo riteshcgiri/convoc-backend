@@ -1,5 +1,6 @@
 const Chat = require('../../models/Chat.model')
 const User = require('../../models/User.model')
+const Message = require('../../models/Message.model')
 
 // create new chat
 const accessChat = async (req, res) => {
@@ -91,6 +92,7 @@ const createGroupChat = async (req, res) => {
 // get user chats on search
 const getUserChats = async (req, res) => {
     try {
+        console.log("getUserChats hit, user:", req.user?.id);
         const currentUserId = req.user.id;
         const { filter } = req.query;
 
@@ -112,34 +114,51 @@ const getUserChats = async (req, res) => {
             .sort({ updatedAt: -1 });
 
         // Apply filters
-        if (filter === "groups") {
-            chats = chats.filter(chat => chat.isGroupChat);
-        }
-
+        if (filter === "groups") chats = chats.filter(chat => chat.isGroupChat);
         if (filter === "favourites") {
             chats = chats.filter(chat =>
-                chat.userSettings.some(
-                    setting =>
-                        setting.user.toString() === currentUserId &&
-                        setting.favourite
-                )
+                chat.userSettings.some(s => s.user.toString() === currentUserId && s.favourite)
             );
         }
-
         if (filter === "archived") {
             chats = chats.filter(chat =>
-                chat.userSettings.some(
-                    setting =>
-                        setting.user.toString() === currentUserId &&
-                        setting.archived
-                )
+                chat.userSettings.some(s => s.user.toString() === currentUserId && s.archived)
             );
         }
 
-        res.status(200).json(chats);
+        // Calculate unread count for each chat
+        const chatsWithUnread = await Promise.all(
+            chats.map(async (chat) => {
+                const setting = chat.userSettings.find(
+                    s => s.user.toString() === currentUserId
+                );
+
+                const msgFilter = {
+                    chat: chat._id,
+                    sender: { $ne: currentUserId },
+                    readBy: { $ne: currentUserId },
+                    isDeletedForEveryone: false,
+                    deletedFor: { $ne: currentUserId },
+                };
+
+                if (setting?.lastClearedAt) {
+                    msgFilter.createdAt = { $gt: setting.lastClearedAt };
+                }
+
+                const unreadCount = await Message.countDocuments(msgFilter);
+
+                return {
+                    ...chat.toObject(),
+                    unreadCount,
+                };
+            })
+        );
+
+        res.status(200).json(chatsWithUnread);
 
     } catch (error) {
-        res.status(500).json({ message: error || "Failed to fetch chats" });
+        console.error("getUserChats CRASH:", error.message, error.stack);
+        res.status(500).json({ message: error.message || "Failed to fetch chats" });
     }
 };
 // add to fav button swtich
