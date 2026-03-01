@@ -6,13 +6,32 @@ const sendMessage = async (req, res) => {
     const { chatId, content, type, fileUrl, replyTo } = req.body;
     const currentUserId = req.user.id;
 
-    if (!chatId) {
-      return res.status(400).json({ message: "Chat ID required" });
+    if (!chatId) return res.status(400).json({ message: "Chat ID required" });
+
+    if (!content && !fileUrl) return res.status(400).json({ message: "Message content required" });
+
+    const chat = await Chat.findById(chatId);
+
+    if (!chat)
+      return res.status(404).json({ message: 'Chat not found' });
+
+    if (chat.isGroupChat && chat.onlyAdminsCanMessage) {
+      const userSetting = chat.userSettings.find( s => s.user.toString() === currentUserId );
+
+      if (!userSetting?.isAdmin)
+        return res.status(403).json({ message: "Only admins can send messages in this group" });
     }
 
-    if (!content && !fileUrl) {
-      return res.status(400).json({ message: "Message content required" });
+    // ✅ Check if admin muted this member
+    if (chat.isGroupChat) {
+      const userSetting = chat.userSettings.find(
+        s => s.user.toString() === currentUserId
+      );
+      if (userSetting?.mutedByAdmin) {
+        return res.status(403).json({ message: "You have been muted by an admin" });
+      }
     }
+
 
     // Create message
     const newMessage = await Message.create({
@@ -38,19 +57,14 @@ const sendMessage = async (req, res) => {
       .populate("chat");
 
     const io = req.app.get("io");
-    const chat = await Chat.findById(chatId).populate("users", "_id");
+    const fullChat = await Chat.findById(chatId).populate("users", "_id");
 
-    chat.users.forEach((user) => {
+    fullChat.users.forEach((user) => {
       if (user._id.toString() !== currentUserId) {
         io.to(user._id.toString()).emit("new_message", fullMessage);
       }
     });
-
-    // ALSO emit to chat room
     io.to(chatId.toString()).emit("new_message", fullMessage);
-
-
-
     res.status(201).json(fullMessage);
 
   } catch (error) {
@@ -238,7 +252,7 @@ const searchMessages = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(20);
 
-      res.json(messages);
+    res.json(messages);
 
   }
   catch (error) {

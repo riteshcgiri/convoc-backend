@@ -1,29 +1,22 @@
 const express = require("express");
 const router = express.Router();
-const { accessChat, createGroupChat, getUserChats, toggleFavourite, deleteChatForUser, updateGroup, } = require("../controllers/chat/chat.controller");
+const { accessChat, createGroupChat, getUserChats, toggleFavourite, deleteChatForUser, updateGroup, addGroupMembers, removeGroupMember, leaveGroup, makeAdmin, dismissAdmin, getGroupInfo, } = require("../controllers/chat/chat.controller");
 const protect = require("../middlewares/auth.middleware");
 
 
 
-// 🔐 All routes protected
 router.use(protect);
-
-// Create or access 1-1 chat
 router.post("/", accessChat);
-
-// Create group chat
-router.post("/group", createGroupChat);
-
-// Get all user chats (with filter)
 router.get("/", getUserChats);
-
-// Toggle favourite
 router.patch("/:chatId/favourite", toggleFavourite);
-
-// Delete chat (soft delete with lastClearedAt)
 router.patch("/:chatId/delete", deleteChatForUser);
-
-// Update group
+router.post("/group", createGroupChat);
+router.get("/:chatId", getGroupInfo);
 router.put("/:chatId", updateGroup);
+router.delete("/:chatId/leave", leaveGroup);
+router.post("/:chatId/members", addGroupMembers);
+router.patch("/:chatId/admin/:userId", makeAdmin);
+router.patch("/:chatId/dismiss/:userId", dismissAdmin);
+router.delete("/:chatId/members/:userId", removeGroupMember);
 
 module.exports = router;

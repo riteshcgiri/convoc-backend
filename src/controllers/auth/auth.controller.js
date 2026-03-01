@@ -6,7 +6,7 @@ const sendEmail = require('../../utils/sendEmail');
 const generateOTP = require('../../utils/generateOTP');
 const mailFormat = require('../../utils/mailFormat.js')
 const emailTemplate = require('../../utils/emailTemplate')
-const generateUsername = require('../../utils/generateUsername')
+const generateUsername = require('../../utils/generateUsername');
 
 
 
@@ -264,16 +264,17 @@ const searchUsers = async (req, res) => {
         if (!q || q.trim() === "")
             return res.json([])
 
-        const phoneQuery = Number(q);
+        const safeQuery = await escapeRegex(q);
+        const phoneQuery = Number(safeQuery);
         const phoneFilter = !isNaN(phoneQuery) ? [{ phone: phoneQuery }] : [];
 
         const users = await User.find({
             _id: { $ne: currentUserId },
             isVerified: true,
             $or: [
-                { name: { $regex: q, $options: "i" } },
-                { username: { $regex: q, $options: "i" } },
-                { email : { $regex: q, $options: "i" } },
+                { name: { $regex: safeQuery, $options: "i" } },
+                { username: { $regex: safeQuery, $options: "i" } },
+                { email : { $regex: safeQuery, $options: "i" } },
                 ...phoneFilter,
             ],
         }).select("name username avatar phone status").limit(10);
@@ -286,6 +287,9 @@ const searchUsers = async (req, res) => {
 }
 
 
+const escapeRegex = (text) => {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
 
 
 

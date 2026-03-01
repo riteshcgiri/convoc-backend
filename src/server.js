@@ -158,6 +158,10 @@ io.on("connection", (socket) => {
       console.error("Error in get_online_users:", err);
     }
   });
+  socket.on("leave_chat", (chatId) => {
+    socket.leave(chatId);
+    console.log("User left chat room:", chatId);
+  });
 
   socket.on("disconnect", async () => {
     const userId = socket.userId;

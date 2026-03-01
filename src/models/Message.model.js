@@ -7,68 +7,76 @@ const messageSchema = new mongoose.Schema(
       ref: "Chat",
       required: true,
     },
-
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
-
-    // Message content
     content: {
       type: String,
       trim: true,
     },
-
     type: {
       type: String,
-      enum: ["text", "image", "video", "file", "audio"],
+      enum: ["text", "image", "video", "file", "audio", "system"],
       default: "text",
     },
+    systemAction: {
+      type: String,
+      enum: [
+        "member_added",
+        "member_removed",
+        "member_left",
+        "admin_changed",
+        "admin_dismissed",
+        "group_renamed",
+        "group_created",
+        "pinned_message",
+      ],
+      default: null,
+    },
+    targetUser: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
 
-    fileUrl: String,
-
-    fileName: String,
-
-    fileSize: Number,
-
-    // Reply system
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
     },
-
-    // Delivery & Read system
     deliveredTo: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
       },
     ],
-
     readBy: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
       },
     ],
-
-    // Edit support
-    isEdited: {
+    isPinned: {
       type: Boolean,
       default: false,
     },
 
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
     editedAt: Date,
-
-    // Soft delete
+    fileUrl: String,
+    fileName: String,
+    fileSize: Number,
+    editedAt: Date,
     deletedFor: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
       },
     ],
-
     isDeletedForEveryone: {
       type: Boolean,
       default: false,
@@ -80,5 +88,6 @@ const messageSchema = new mongoose.Schema(
 // Performance indexes
 messageSchema.index({ chat: 1, createdAt: -1 });
 messageSchema.index({ sender: 1 });
+messageSchema.index({ isPinned: 1, chat: 1 }); 
 
 module.exports = mongoose.model("Message", messageSchema);

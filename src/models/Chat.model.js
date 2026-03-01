@@ -33,6 +33,38 @@ const chatSchema = new mongoose.Schema({
         trim: true,
         maxlength: 200,
     },
+    groupType: {
+        type: String,
+        enum: ["study", "entertainment", "exploration", "work", "family", "friends", "custom"],
+        default: "custom",
+    },
+    groupTypeLabel: {
+        type: String,
+        trim: true,
+        maxlength: 30,
+    },
+    onlyAdminsCanMessage: {
+        type: Boolean,
+        default: false,
+    },
+    onlyAdminsCanAddMembers: {
+        type: Boolean,
+        default: false,
+    },
+    onlyAdminsCanEditInfo: {
+        type: Boolean,
+        default: false,
+    },
+    pinnedMessage: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Message",
+        default: null,
+    },
+    inviteLink: {
+        type: String,
+        unique: true,
+        sparse: true, // only unique when set
+    },
     latestMessage: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Message",
@@ -43,10 +75,7 @@ const chatSchema = new mongoose.Schema({
                 type: mongoose.Schema.Types.ObjectId,
                 ref: "User",
             },
-            muted: {
-                type: Boolean,
-                default: false,
-            },
+
             favourite: {
                 type: Boolean,
                 default: false,
@@ -55,18 +84,37 @@ const chatSchema = new mongoose.Schema({
                 type: Boolean,
                 default: false,
             },
+            isAdmin: {
+                type: Boolean,
+                default: false,
+            },
+            muted: {
+                type: Boolean,
+                default: false,
+            },
+            mutedUntil: {
+                type: Date,
+            },
+            mutedByAdmin: {
+                type: Boolean,
+                default: false,
+            },
+            joinedAt: {
+                type: Date,
+                default: Date.now,
+            },
             deletedAt: Date,
-            lastClearedAt: Date, // 🔥 important
-        },
-    ],
+            lastClearedAt: Date,
+        }],
     isDeleted: {
         type: Boolean,
         default: false,
     },
 },
-    { timestamps: true}
+    { timestamps: true }
 )
 
 chatSchema.index({ users: 1 });
+chatSchema.index({ inviteLink: 1 });
 
 module.exports = mongoose.model("Chat", chatSchema);
