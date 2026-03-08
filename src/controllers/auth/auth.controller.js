@@ -124,6 +124,9 @@ const signIn = async (req, res) => {
 
     const user = await User.findOne({ $or: [{ email }, { username: email }], });
 
+    if (user.isDisabled)
+        return res.status(403).json({ message: "This account has been disabled. Contact support to reactivate." });
+
     if (!user)
         return res.status(400).json({ message: 'Invalid credentials' })
 
@@ -274,7 +277,7 @@ const searchUsers = async (req, res) => {
             $or: [
                 { name: { $regex: safeQuery, $options: "i" } },
                 { username: { $regex: safeQuery, $options: "i" } },
-                { email : { $regex: safeQuery, $options: "i" } },
+                { email: { $regex: safeQuery, $options: "i" } },
                 ...phoneFilter,
             ],
         }).select("name username avatar phone status").limit(10);
@@ -286,11 +289,152 @@ const searchUsers = async (req, res) => {
     }
 }
 
+const updateProfile = async (req, res) => {
+    try {
+        const { name, username, about, avatar, allowBrowserNotifications, muteNotifications, agreeTerms, agreePrivacy } = req.body;
+        const currentUserId = req.user.id;
+        if (username) {
+            const exists = await User.findOne({ username, _id: { $ne: currentUserId } })
+            if (exists) return res.status(400).json({ message: "Username already taken" })
+        }
+
+        const updated = await User.findByIdAndUpdate(
+            currentUserId,
+            { name, username, about, avatar, allowBrowserNotifications, muteNotifications, agreeTerms, agreePrivacy },
+            { new: true, runValidators: true }
+        ).select("-password")
+
+        res.json(updated)
+    } catch (error) {
+        res.status(500).json({ message: error || "Failed to update Profile" })
+    }
+}
+
+const changePassword = async (req, res) => {
+    try {
+        const { oldPassword, newPassword } = req.body;
+        const currentUserId = req.user.id;
+
+        const user = await User.findById(currentUserId);
+        const isMatch = await bcrypt.compare(oldPassword, user.password);
+        if (!isMatch) return res.status(400).json({ message: "Old password is incorrect" });
+
+        user.password = await bcrypt.hash(newPassword, 10);
+        await user.save();
+
+        res.json({ message: "Password changed successfully" });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to change password" });
+    }
+}
+
+const sendPhoneOtp = async (req, res) => {
+    // 🔒 Blocked until SMS service is integrated
+    return res.status(503).json({
+        message: "Phone verification is currently unavailable"
+    });
+};
+
+const verifyPhoneOtp = async (req, res) => {
+    // 🔒 Blocked until SMS service is integrated
+    return res.status(503).json({
+        message: "Phone verification is currently unavailable"
+    });
+};
+
+const disableAccount = async (req, res) => {
+    try {
+        const currentUserId = req.user.id;
+
+        await User.findByIdAndUpdate(currentUserId, {
+            isDisabled: true,
+            disabledAt: new Date(),
+        });
+
+        res.json({ message: "Account disabled successfully" });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to disable account" });
+    }
+};
+
+const deleteAccount = async (req, res) => {
+    try {
+        const { password } = req.body;
+        const currentUserId = req.user.id;
+
+        const user = await User.findById(currentUserId);
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) return res.status(400).json({ message: "Incorrect password" });
+
+        // Remove from all chats
+        await Chat.updateMany(
+            { users: currentUserId },
+            { $pull: { users: currentUserId, userSettings: { user: currentUserId } } }
+        );
+
+        // Delete all messages
+        await Message.deleteMany({ sender: currentUserId });
+
+        // Delete user
+        await User.findByIdAndDelete(currentUserId);
+
+        res.json({ message: "Account deleted successfully" });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to delete account" });
+    }
+};
+
+const getFriends = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id)
+            .populate("friends", "name username avatar status");
+        res.json(user.friends);
+    } catch (error) {
+        res.status(500).json({ message: "Failed to fetch friends" });
+    }
+};
+
+const addFriend = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const currentUserId = req.user.id;
+
+        await User.findByIdAndUpdate(currentUserId, {
+            $addToSet: { friends: userId }
+        });
+        await User.findByIdAndUpdate(userId, {
+            $addToSet: { friends: currentUserId }
+        });
+
+        res.json({ message: "Friend added" });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to add friend" });
+    }
+};
+
+const removeFriend = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const currentUserId = req.user.id;
+
+        await User.findByIdAndUpdate(currentUserId, {
+            $pull: { friends: userId }
+        });
+        await User.findByIdAndUpdate(userId, {
+            $pull: { friends: currentUserId }
+        });
+
+        res.json({ message: "Friend removed" });
+    } catch (error) {
+        res.status(500).json({ message: "Failed to remove friend" });
+    }
+};
+
 
 const escapeRegex = (text) => {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
 
 
-module.exports = { signIn, signUp, verifyOTP, resendOTP, requestPasswordReset, verifyResetOtp, resetPassword, getMe, searchUsers }
+module.exports = { signIn, signUp, verifyOTP, resendOTP, requestPasswordReset, verifyResetOtp, resetPassword, getMe, searchUsers, updateProfile, changePassword, sendPhoneOtp, verifyPhoneOtp, disableAccount, deleteAccount, getFriends, addFriend, removeFriend }

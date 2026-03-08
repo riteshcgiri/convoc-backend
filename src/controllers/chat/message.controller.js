@@ -16,24 +16,18 @@ const sendMessage = async (req, res) => {
       return res.status(404).json({ message: 'Chat not found' });
 
     if (chat.isGroupChat && chat.onlyAdminsCanMessage) {
-      const userSetting = chat.userSettings.find( s => s.user.toString() === currentUserId );
-
+      const userSetting = chat.userSettings.find(s => s.user.toString() === currentUserId);
       if (!userSetting?.isAdmin)
         return res.status(403).json({ message: "Only admins can send messages in this group" });
     }
 
-    // ✅ Check if admin muted this member
     if (chat.isGroupChat) {
-      const userSetting = chat.userSettings.find(
-        s => s.user.toString() === currentUserId
-      );
+      const userSetting = chat.userSettings.find(s => s.user.toString() === currentUserId);
       if (userSetting?.mutedByAdmin) {
         return res.status(403).json({ message: "You have been muted by an admin" });
       }
     }
 
-
-    // Create message
     const newMessage = await Message.create({
       chat: chatId,
       sender: currentUserId,
@@ -41,16 +35,16 @@ const sendMessage = async (req, res) => {
       type: type || "text",
       fileUrl,
       replyTo,
-      deliveredTo: [currentUserId], // sender auto delivered
-      readBy: [currentUserId], // sender auto read
+      deliveredTo: [currentUserId],
+      readBy: [currentUserId],
     });
 
-    // Update latestMessage in chat
+    // Update latestMessage and reset deletedAt for all users in one operation
     await Chat.findByIdAndUpdate(chatId, {
       latestMessage: newMessage._id,
+      $set: { "userSettings.$[].deletedAt": null }
     });
 
-    // Populate message fully
     const fullMessage = await Message.findById(newMessage._id)
       .populate("sender", "name username avatar")
       .populate("replyTo")
@@ -65,6 +59,7 @@ const sendMessage = async (req, res) => {
       }
     });
     io.to(chatId.toString()).emit("new_message", fullMessage);
+    
     res.status(201).json(fullMessage);
 
   } catch (error) {

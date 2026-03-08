@@ -31,7 +31,7 @@ const chatSchema = new mongoose.Schema({
     groupAbout: {
         type: String,
         trim: true,
-        maxlength: 200,
+        maxlength: 500,
     },
     groupType: {
         type: String,
