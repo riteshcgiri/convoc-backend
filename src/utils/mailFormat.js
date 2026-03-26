@@ -6,6 +6,7 @@ const emailTemplate = ({
   expiresIn = null,
   description = "",
   buttonLink = "localhost:5173/",
+  buttonText = 'VISIT CONVOC',
   footerNote = "If you didn’t request this, you can safely ignore this email.",
 }) => {
 
@@ -93,7 +94,7 @@ const emailTemplate = ({
               text-decoration:none;
               font-weight:600;
             ">
-              VISIT CONVOC
+              ${buttonText}
             </a>
           </td>
         </tr>` : ""}

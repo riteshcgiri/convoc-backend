@@ -19,6 +19,7 @@ app.set("io", io);
 
 // Track online users { userId: socketId }
 const onlineUsers = new Map();
+app.set("onlineUsers", onlineUsers);
 
 io.on("connection", (socket) => {
 
@@ -162,6 +163,71 @@ io.on("connection", (socket) => {
     socket.leave(chatId);
     console.log("User left chat room:", chatId);
   });
+
+  // File signaling events
+  socket.on("file_offer", ({ targetUserId, offer, fileInfo }) => {
+    console.log("file_offer received, fileInfo:", fileInfo);
+    // validate fileInfo
+    if (!fileInfo?.name || !fileInfo?.size || !fileInfo?.type) return;
+    if (fileInfo.size > 25 * 1024 * 1024) return; // block large on server too
+
+    const dangerousExtensions = ["exe", "sh", "bat", "cmd", "php", "py", "vbs", "ps1", "msi", "dll", "jar"];
+    const ext = fileInfo.name.split(".").pop().toLowerCase();
+    if (dangerousExtensions.includes(ext)) return;
+
+    // forward to target user
+    io.to(targetUserId).emit("file_offer", {
+      fromUserId: socket.userId,
+      fromUserName: socket.userName,
+      offer,
+      fileInfo,
+      autoAccept: true,
+    });
+  });
+
+  socket.on("file_answer", ({ targetUserId, answer }) => {
+    io.to(targetUserId).emit("file_answer", { answer });
+  });
+
+  socket.on("file_ice_candidate", ({ targetUserId, candidate }) => {
+    io.to(targetUserId).emit("file_ice_candidate", { candidate });
+  });
+
+  socket.on("file_rejected", ({ targetUserId }) => {
+    io.to(targetUserId).emit("file_rejected");
+  });
+
+  // Calling events start here
+  socket.on("call_user", ({ targetUserId, callerName, callerAvatar, chatId, type }) => {
+    io.to(targetUserId).emit("incoming_call", { callerId: socket.userId, callerName, callerAvatar, chatId, type,  })
+  });
+
+  socket.on("call_accepted", ({ targetUserId, chatId }) => {
+    io.to(targetUserId).emit("call_accepted", { userId: socket.userId, chatId })
+  });
+
+  socket.on("call_rejected", ({ targetUserId }) => {
+    io.to(targetUserId).emit("call_rejected", { userId: socket.userId })
+  });
+
+  socket.on("call_offer", ({ targetUserId, offer }) => {
+    io.to(targetUserId).emit("call_offer", { offer, callerId: socket.userId })
+  })
+
+  socket.on("call_answer", ({ targetUserId, answer }) => {
+    io.to(targetUserId).emit("call_answer", { answer, userId: socket.userId })
+  })
+
+  socket.on("call_ice_candidate", ({ targetUserId, candidate }) => {
+    io.to(targetUserId).emit("call_ice_candidate", { candidate, userId: socket.userId })
+  })
+
+  socket.on("call_ended", ({ targetUserId }) => {
+    io.to(targetUserId).emit("call_ended", { userId: socket.userId });
+  });
+
+
+
 
   socket.on("disconnect", async () => {
     const userId = socket.userId;

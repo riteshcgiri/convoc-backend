@@ -66,9 +66,9 @@ const userSchema = new mongoose.Schema({
     phoneOtpExpires: {
         type: Date
     },
-    isPhoneVerified : {
-        type : Boolean,
-        default : false
+    isPhoneVerified: {
+        type: Boolean,
+        default: false
     },
     isVerified: {
         type: Boolean,
@@ -100,6 +100,8 @@ const userSchema = new mongoose.Schema({
         default: false,
     },
     disabledAt: Date,
+    reactivateToken: String,
+    reactivateTokenExpires: Date,
     allowBroswerNotifications: {
         type: Boolean,
         default: true,
@@ -112,8 +114,29 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
     }],
-
-
+    showPopups: {
+        type: Boolean,
+        default: true,
+    },
+    offerLetter: {
+        type: Boolean,
+        default: false,
+    },
+    usernameChangedAt: Date,
+    phoneChangedAt: Date,
+    passwordChangedCount: { type: Number, default: 0 },
+    passwordChangedDate: Date,
+    reactivatedAt: Date,
+    totalMessagesCount: { type: Number, default: 0 },
+    totalOnlineTime: { type: Number, default: 0 },
+    lastOnlineAt: Date,
+    pushSubscription : {
+        endpoint : String,
+        keys : {
+            p256dh : String,
+            auth : String,
+        }
+    }
 },
     { timestamps: true }
 )

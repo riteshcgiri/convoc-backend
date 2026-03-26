@@ -14,7 +14,7 @@ const messageSchema = new mongoose.Schema(
     },
     content: {
       type: String,
-      trim: true,
+      default: "",
     },
     type: {
       type: String,
@@ -41,10 +41,7 @@ const messageSchema = new mongoose.Schema(
       default: null,
     },
 
-    replyTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Message",
-    },
+
     deliveredTo: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -70,6 +67,23 @@ const messageSchema = new mongoose.Schema(
     fileUrl: String,
     fileName: String,
     fileSize: Number,
+    fileInfo: {
+      name: { type: String },
+      size: { type: Number },
+      type: { type: String },
+      category: { 
+        type: String,
+        enum : ['image', 'video', 'audio', 'pdf', 'document', 'spreadsheet', 'presentation', 'other'],
+       },
+      localUrl: { type: String },
+    },
+    isFile: {
+      type: Boolean,
+      default: false,
+    },
+    hasLinks : { type : Boolean, default : false },
+    links : [{type : String,}],
+
     editedAt: Date,
     deletedFor: [
       {
@@ -81,6 +95,10 @@ const messageSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+    },
   },
   { timestamps: true }
 );
@@ -88,6 +106,6 @@ const messageSchema = new mongoose.Schema(
 // Performance indexes
 messageSchema.index({ chat: 1, createdAt: -1 });
 messageSchema.index({ sender: 1 });
-messageSchema.index({ isPinned: 1, chat: 1 }); 
+messageSchema.index({ isPinned: 1, chat: 1 });
 
 module.exports = mongoose.model("Message", messageSchema);

@@ -1,21 +1,32 @@
 const jwt = require('jsonwebtoken')
 const User = require('../models/User.model.js')
+const Session = require('../models/Session.model.js')
+const crypto = require('crypto')
+
 
 const protect = async (req, res, next) => {
-    let token;
-    if(req.headers.authorization && req.headers.authorization.startsWith("Bearer")){
-        token = req.headers.authorization.split(" ")[1];
-    }
-    if(!token)
-        return res.status(401).json({message :  "Not authorized"})
-
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET)
+        const token = req.headers.authorization?.split(" ")[1];
+        if (!token) return res.status(401).json({ message: "No token" });
 
-        req.user = await User.findById(decoded.id).select("-password");
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        // ✅ check if session is still active
+        const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+        const session = await Session.findOne({ token: hashedToken });
+
+        if (!session || !session.isActive) {
+            return res.status(401).json({ message: "Session expired. Please login again." });
+        }
+
+        // update lastActive
+        session.lastActive = new Date();
+        await session.save();
+
+        req.user = decoded;
         next();
-    } catch (error) {
-        res.status(401).json({ message: "Token failed" });
+    } catch (err) {
+        return res.status(401).json({ message: "Invalid token" });
     }
 };
 

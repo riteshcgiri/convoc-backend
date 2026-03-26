@@ -1,14 +1,22 @@
 const Message = require("../../models/Message.model");
 const Chat = require("../../models/Chat.model");
+const User = require('../../models/User.model')
+const sendPushNotification = require('../../utils/sendPushNotification')
+const LinkifyIt = require("linkify-it");
+const linkify = new LinkifyIt();
 
 const sendMessage = async (req, res) => {
   try {
-    const { chatId, content, type, fileUrl, replyTo } = req.body;
+    console.log("sendMessage body:", req.body);
+    const { chatId, content, type, fileInfo, replyTo } = req.body;
     const currentUserId = req.user.id;
+
+    const matches = content ? linkify.match(content) || [] : [];
+    const extractedLinks = matches.map(m => m.url);
 
     if (!chatId) return res.status(400).json({ message: "Chat ID required" });
 
-    if (!content && !fileUrl) return res.status(400).json({ message: "Message content required" });
+    if (!fileInfo && (!content || !content.trim())) return res.status(400).json({ message: "Message content required" });
 
     const chat = await Chat.findById(chatId);
 
@@ -31,15 +39,17 @@ const sendMessage = async (req, res) => {
     const newMessage = await Message.create({
       chat: chatId,
       sender: currentUserId,
-      content,
+      content: fileInfo ? fileInfo?.name : content,
       type: type || "text",
-      fileUrl,
-      replyTo,
+      isFile: !!fileInfo,
+      fileInfo: fileInfo || undefined,
+      hasLinks: extractedLinks.length > 0,
+      links: extractedLinks,
+      replyTo: replyTo || null,
       deliveredTo: [currentUserId],
       readBy: [currentUserId],
     });
 
-    // Update latestMessage and reset deletedAt for all users in one operation
     await Chat.findByIdAndUpdate(chatId, {
       latestMessage: newMessage._id,
       $set: { "userSettings.$[].deletedAt": null }
@@ -47,7 +57,8 @@ const sendMessage = async (req, res) => {
 
     const fullMessage = await Message.findById(newMessage._id)
       .populate("sender", "name username avatar")
-      .populate("replyTo")
+      .populate("replyTo", "content sender")
+      .populate({ path: "replyTo", populate: { path: "sender", select: "name" } })
       .populate("chat");
 
     const io = req.app.get("io");
@@ -59,11 +70,54 @@ const sendMessage = async (req, res) => {
       }
     });
     io.to(chatId.toString()).emit("new_message", fullMessage);
-    
+
+    // ── Push Notifications ────────────────────────────────────────────────────
+    const onlineUsers = req.app.get("onlineUsers");
+    console.log("Online users:", [...(onlineUsers?.keys() || [])]);
+    console.log("Chat members:", fullChat.users.map(u => u._id.toString()));
+
+    for (const user of fullChat.users) {
+      if (user._id.toString() === currentUserId) {
+        console.log("Skipping sender:", user._id); continue;
+      }         
+      if (onlineUsers?.has(user._id.toString())) {
+        console.log("Skipping online user:", user._id); continue;
+      }
+
+      const member = await User.findById(user._id);
+      console.log("Member subscription:", member?.pushSubscription?.endpoint);
+      console.log("Member allowBrowserNotifications:", member?.allowBroswerNotifications);
+
+      if (!member?.pushSubscription?.endpoint) {
+        console.log("No subscription for:", user._id); continue;
+      }
+      if (!member.allowBroswerNotifications) {
+        console.log("Notifications off for:", user._id); continue;
+      }
+
+      const setting = chat.userSettings.find(
+        s => s.user.toString() === user._id.toString()
+      );
+      if (setting?.muted) continue;                                 
+
+      await sendPushNotification(member.pushSubscription, {
+        title: chat.isGroupChat ? chat.chatName : req.user.name,
+        body: fileInfo
+          ? `${req.user.name} sent a file`
+          : chat.isGroupChat
+            ? `${req.user.name}: ${content?.slice(0, 60)}`
+            : content?.slice(0, 60),
+        icon: "/favicon.png",
+        badge: "/badge.png",
+        chatId: chatId.toString(),
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     res.status(201).json(fullMessage);
 
   } catch (error) {
-    console.error(error);
+    console.error("sendMessage CRASH:", error.message, error.stack);
     res.status(500).json({ message: "Failed to send message" });
   }
 };
@@ -92,6 +146,7 @@ const getMessages = async (req, res) => {
     const messages = await Message.find(filter)
       .populate("sender", "name username")
       .populate("replyTo")
+      .populate({ path: "replyTo", populate: { path: "sender", select: "name" } })
       .sort({ createdAt: 1 });
 
     res.json(messages);
@@ -172,6 +227,11 @@ const editMessage = async (req, res) => {
     message.editedAt = new Date();
 
     await message.save();
+    const populatedMessage = await Message.findById(message._id)
+      .populate("sender", "name avatar")
+      .populate({ path: "replyTo", populate: { path: "sender", select: "name" } });
+    const io = req.app.get("io");
+    io.to(message.chat.toString()).emit("message_edited", populatedMessage);
 
     res.json(message);
 
@@ -193,6 +253,13 @@ const deleteForMe = async (req, res) => {
     if (!message.deletedFor.includes(currentUserId)) {
       message.deletedFor.push(currentUserId);
       await message.save();
+      const io = req.app.get("io");
+      io.to(message.chat.toString()).emit("message_deleted", {
+        messageId: message._id,
+        chatId: message.chat,
+        userId: currentUserId,
+        type: "me"
+      });
     }
 
 
@@ -222,6 +289,8 @@ const deleteForEveryone = async (req, res) => {
     message.content = "This message was deleted";
     message.deletedFor = [];
     await message.save();
+    const io = req.app.get('io')
+    io.to(message.chat.toString()).emit("message_deleted", { messageId: message._id, chatId: message.chat, type: "everyone" })
 
     res.json({ message: "Message deleted for everyone" });
 
@@ -229,6 +298,33 @@ const deleteForEveryone = async (req, res) => {
     res.status(500).json({ message: "Failed to delete message" });
   }
 };
+
+const getMessageInfo = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const currentUserId = req.user.id;
+
+    const message = await Message.findById(messageId)
+      .populate("deliveredTo", "name avatar")
+      .populate("readBy", "name avatar")
+      .populate("sender", "name avatar")
+    if (!message) return res.status(404).json({ message: 'Message not found' })
+    if (message.sender._id.toString() !== currentUserId) return res.status(403).json({ message: "Not Allowd" })
+
+    res.json({
+      _id: message._id,
+      content: message.content,
+      createdAt: message.createdAt,
+      editedAt: message.editedAt,
+      deliveredTo: message.deliveredTo.filter(u => u._id.toString() !== currentUserId),
+      readBy: message.readBy.filter(u => u._id.toString() !== currentUserId),
+    })
+
+
+  } catch (err) {
+    res.status(500).json({ message: err?.message || 'Failed to get message info' })
+  }
+}
 
 const searchMessages = async (req, res) => {
   try {
@@ -255,5 +351,143 @@ const searchMessages = async (req, res) => {
   }
 }
 
-module.exports = { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, searchMessages, };
+const getMediaFiles = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+
+    const messages = await Message.find({
+      chat: chatId,
+      isFile: true,
+      isDeletedForEveryone: false,
+      "fileInfo.category": { $in: ["image", "video", "audio"] },
+    })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
+      .populate("sender", "name avatar");
+
+    const total = await Message.countDocuments({
+      chat: chatId,
+      isFile: true,
+      isDeletedForEveryone: false,
+      "fileInfo.category": { $in: ["image", "video", "audio"] },
+    });
+
+    res.json({ messages, total, pages: Math.ceil(total / limit) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch media" });
+  }
+};
+
+const getDocuments = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+
+    const messages = await Message.find({
+      chat: chatId,
+      isFile: true,
+      isDeletedForEveryone: false,
+      "fileInfo.category": { $in: ["pdf", "document", "spreadsheet", "presentation", "other"] },
+    })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
+      .populate("sender", "name avatar");
+
+    const total = await Message.countDocuments({
+      chat: chatId,
+      isFile: true,
+      isDeletedForEveryone: false,
+      "fileInfo.category": { $in: ["pdf", "document", "spreadsheet", "presentation", "other"] },
+    });
+
+    res.json({ messages, total, pages: Math.ceil(total / limit) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch documents" });
+  }
+};
+
+const getLinks = async (req, res) => {
+  console.log("getLinks called:", req.params.chatId);
+  try {
+    const { chatId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+    const messages = await Message.find({
+      chat: chatId,
+      hasLinks: true,
+      isDeletedForEveryone: false,
+    })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
+      .populate("sender", "name avatar");
+    const total = await Message.countDocuments({
+      chat: chatId,
+      hasLinks: true,
+      isDeletedForEveryone: false,
+    });
+
+    res.json({ messages, total, pages: Math.ceil(total / limit) });
+  } catch (error) {
+    console.error("getLinks CRASH:", error.message, error.stack);
+    res.status(500).json({ message: error });
+  }
+};
+
+const bulkDeleteForMe = async (req, res) => {
+  try {
+    const { messageIds } = req.body;
+    if (!messageIds?.length) return res.status(400).json({ message: "No messages selected" });
+
+    await Message.updateMany(
+      { _id: { $in: messageIds } },
+      { $addToSet: { deletedFor: req.user.id } }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+const bulkDeleteForEveryone = async (req, res) => {
+  try {
+    const { messageIds } = req.body;
+    if (!messageIds?.length) return res.status(400).json({ message: "No messages selected" });
+
+    // Verify all messages belong to this user
+    const messages = await Message.find({ _id: { $in: messageIds }, sender: req.user.id });
+    if (messages.length !== messageIds.length) {
+      return res.status(403).json({ message: "Can only delete your own messages" });
+    }
+
+    await Message.updateMany(
+      { _id: { $in: messageIds }, sender: req.user.id },
+      { isDeletedForEveryone: true }
+    );
+
+    // Emit socket events for each chat room
+    const io = req.app.get("io");
+    const grouped = {};
+    messages.forEach(m => {
+      const cid = m.chat.toString();
+      if (!grouped[cid]) grouped[cid] = [];
+      grouped[cid].push(m._id);
+    });
+
+    Object.entries(grouped).forEach(([chatId, ids]) => {
+      ids.forEach(messageId => {
+        io.to(chatId).emit("message_deleted", { messageId, chatId });
+      });
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+module.exports = { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, getMessageInfo, searchMessages, getMediaFiles, getDocuments, getLinks, bulkDeleteForMe, bulkDeleteForEveryone };
 
