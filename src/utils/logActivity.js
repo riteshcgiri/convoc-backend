@@ -11,7 +11,7 @@ const logActivity = async ({userId, action, metadata = {}, ip = '', device = '',
             device,
             isUserVisible
         })
-        console.log("logActivity saved:", log._id);
+        console.log("logActivity saved:", userId?._id);
     } catch (error) {
          console.error("Failed to log activity:", error.message);
     }

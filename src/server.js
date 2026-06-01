@@ -1,5 +1,9 @@
+const { createCallLog } = require('./controllers/calls/callLog.controller.js')
+
 const Message = require("./models/Message.model");
 const Chat = require("./models/Chat.model");
+const CallLog = require("./models/CallLog.model.js")
+
 const dotenv = require("dotenv");
 dotenv.config();
 
@@ -12,8 +16,19 @@ const connectDB = require("./config/db");
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: "*" },
+  cors: {
+    origin: [
+      "http://localhost:5173",
+      /\.ngrok-free\.app$/,
+      /\.ngrok-free\.dev$/,
+    ],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    credentials: true,
+  },
 });
+
+const activeCalls = new Map();
+
 
 app.set("io", io);
 
@@ -199,14 +214,35 @@ io.on("connection", (socket) => {
 
   // Calling events start here
   socket.on("call_user", ({ targetUserId, callerName, callerAvatar, chatId, type }) => {
-    io.to(targetUserId).emit("incoming_call", { callerId: socket.userId, callerName, callerAvatar, chatId, type,  })
+    const callKey = [socket.userId, targetUserId].sort().join("_");
+    activeCalls.set(callKey, {
+      initiatorId: socket.userId,
+      receiverId: targetUserId,
+      chatId,
+      type,
+      startedAt: null,
+    })
+
+    io.to(targetUserId).emit("incoming_call", { callerId: socket.userId, callerName, callerAvatar, chatId, type, })
   });
 
   socket.on("call_accepted", ({ targetUserId, chatId }) => {
+    const callKey = [socket.userId, targetUserId].sort().join("_")
+    const call = activeCalls.get(callKey)
+    if (call) {
+      call.startedAt = new Date()
+      console.log("startedAt set:", call.startedAt)          // ← add this
+    }
     io.to(targetUserId).emit("call_accepted", { userId: socket.userId, chatId })
   });
 
   socket.on("call_rejected", ({ targetUserId }) => {
+    const callKey = [socket.userId, targetUserId].sort().join("_")
+    const call = activeCalls.get(callKey)
+    if (call) {
+      createCallLog({ ...call, status: "rejected", endedAt: new Date() })
+      activeCalls.delete(callKey)
+    }
     io.to(targetUserId).emit("call_rejected", { userId: socket.userId })
   });
 
@@ -222,23 +258,75 @@ io.on("connection", (socket) => {
     io.to(targetUserId).emit("call_ice_candidate", { candidate, userId: socket.userId })
   })
 
-  socket.on("call_ended", ({ targetUserId }) => {
-    io.to(targetUserId).emit("call_ended", { userId: socket.userId });
-  });
+  socket.on("call_ended", async ({ targetUserId }) => {
+    const callKey = [socket.userId, targetUserId].sort().join("_")
+    const call = activeCalls.get(callKey)
 
+    if (call) {
+      const status = call.startedAt ? "completed" : "cancelled"
+
+      // save call log
+      await createCallLog({ ...call, status, endedAt: new Date() })
+      const savedLog = await CallLog.findOne({
+        initiator: call.initiatorId,
+        receiver: call.receiverId,
+      }).sort({ createdAt: -1 })
+        .populate("initiator", "name avatar username")
+        .populate("receiver", "name avatar username")
+        .lean()
+
+        if(savedLog){
+          io.to(call.initiatorId).emit("call_log_added", savedLog)
+          io.to(call.receiverId).emit("call_log_added", savedLog)
+        }
+
+      // ── system message ─────────────────────────────────────
+      if (call.startedAt) {
+        const duration = Math.floor((new Date() - call.startedAt) / 1000)
+        const mins = Math.floor(duration / 60)
+        const secs = duration % 60
+        const durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+
+        const systemMsg = await Message.create({
+          chat: call.chatId,
+          sender: socket.userId,
+          content: `${call.type === "video" ? "Video • " : "Voice • "} Call ended • ${durationStr}`,
+          type: "system",
+          systemAction: "call_ended",
+        })
+
+        io.to(call.chatId).emit("new_message", systemMsg)
+      }
+      // ───────────────────────────────────────────────────────
+
+      activeCalls.delete(callKey)
+    }
+
+    // notify other person
+    io.to(targetUserId).emit("call_ended", { userId: socket.userId })
+  })
 
 
 
   socket.on("disconnect", async () => {
     const userId = socket.userId;
-    console.log("Socket disconnected:", socket.id);
-
     if (!userId) return;
+    onlineUsers.delete(userId)
+    // activeChats.delete(userId)
 
-    onlineUsers.delete(userId);
+    activeCalls.forEach((call, callKey) => {
+      if (call.initiatorId === userId || call.receiverId === userId) {
 
-    // Notify all chat members this user is offline
+        const targetUserId = call.initiatorId === userId ? call.receiverId : call.initiatorId
+        io.to(targetUserId).emit("call_ended", { userId })
+
+        const status = call.startedAt ? "completed" : "cancelled"
+        createCallLog({ ...call, status, endedAt: new Date() })
+        activeCalls.delete(callKey)
+      }
+    })
     try {
+
       const chats = await Chat.find({ users: userId });
       chats.forEach((chat) => {
         chat.users.forEach((memberId) => {

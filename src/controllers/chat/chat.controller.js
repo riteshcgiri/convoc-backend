@@ -57,7 +57,7 @@ const accessChat = async (req, res) => {
 }
 
 // get user chats on search
-const getUserChats = async (req, res) => {
+const getUserChats = async (req, res, next) => {
     try {
         console.log("getUserChats hit, user:", req.user?.id);
         const currentUserId = req.user.id;
@@ -129,6 +129,7 @@ const getUserChats = async (req, res) => {
         res.status(200).json(chatsWithUnread);
 
     } catch (error) {
+        next(error)
         console.error("getUserChats CRASH:", error.message, error.stack);
         res.status(500).json({ message: error.message || "Failed to fetch chats" });
     }

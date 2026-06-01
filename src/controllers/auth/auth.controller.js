@@ -536,7 +536,6 @@ const disableAccount = async (req, res) => {
         });
 
         const reactivateLink = `${process.env.CLIENT_URL}/reactivate/${token}`;
-
         sendEmail(
             user.email,
             "CONVOC — Account Disabled",
