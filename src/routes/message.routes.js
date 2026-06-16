@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const protect = require("../middlewares/auth.middleware");
-const { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, getMessageInfo, searchMessages, getMediaFiles, getDocuments, getLinks, bulkDeleteForMe, bulkDeleteForEveryone  } = require("../controllers/chat/message.controller");
+const { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, getMessageInfo, searchMessages, getMediaFiles, getDocuments, getLinks, getAllMediaFiles, getAllDocs, getAllLinks, bulkDeleteForMe, bulkDeleteForEveryone  } = require("../controllers/chat/message.controller");
 
 
 router.use(protect);
@@ -17,6 +17,10 @@ router.get("/:messageId/info", getMessageInfo);
 router.get("/:chatId/media/files", getMediaFiles)
 router.get("/:chatId/media/docs", getDocuments)
 router.get("/:chatId/media/links", getLinks)
+router.get("/media/files", getAllMediaFiles)
+router.get("/media/docs", getAllDocs)
+router.get("/media/links", getAllLinks)
+
 router.patch("/bulk-delete",  bulkDeleteForMe);
 router.patch("/bulk-delete-everyone",  bulkDeleteForEveryone);
 

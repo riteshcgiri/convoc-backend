@@ -79,7 +79,7 @@ const sendMessage = async (req, res) => {
     for (const user of fullChat.users) {
       if (user._id.toString() === currentUserId) {
         console.log("Skipping sender:", user._id); continue;
-      }         
+      }
       if (onlineUsers?.has(user._id.toString())) {
         console.log("Skipping online user:", user._id); continue;
       }
@@ -98,7 +98,7 @@ const sendMessage = async (req, res) => {
       const setting = chat.userSettings.find(
         s => s.user.toString() === user._id.toString()
       );
-      if (setting?.muted) continue;                                 
+      if (setting?.muted) continue;
 
       await sendPushNotification(member.pushSubscription, {
         title: chat.isGroupChat ? chat.chatName : req.user.name,
@@ -436,6 +436,72 @@ const getLinks = async (req, res) => {
   }
 };
 
+const getAllMediaFiles = async (req, res) => {
+  try {
+    const chats = await Chat.find({ users: req.user.id }).select('_id')
+    const chatIds = chats.map(c => c._id)
+
+    const messages = await Message.find({
+      chat: { $in: chatIds },
+      isFile: true,
+      isDeletedForEveryone: false,
+      deletedFor: { $nin: [req.user.id] },
+      'fileInfo.category': { $in: ['image', 'video', 'audio'] },
+    })
+      .populate('sender', 'name avatar')
+      .populate('chat', 'chatName isGroupChat')
+      .sort({ createdAt: -1 })
+
+    res.json(messages)
+  } catch (error) {
+    res.status(500).json({ message: error.message })
+    console.log(error)
+  }
+}
+
+const getAllDocs = async (req, res) => {
+  try {
+    const chats = await Chat.find({ users: req.user.id }).select('_id');
+    const chatIds = chats.map(c => c._id)
+
+    const messages = await Message.find({
+      chat: { $in: chatIds },
+      isFile: true,
+      isDeletedForEveryone: false,
+      deletedFor: { $nin: [req.user.id] },
+      'fileInfo.category': 'document'
+    })
+      .populate('sender', 'name avatar')
+      .populate('chat', 'chatName isGroupChat')
+      .sort({ createdAt: -1 })
+
+    res.json(messages)
+  } catch (error) {
+    res.status(500).json({ message: error.message })
+  }
+}
+
+const getAllLinks = async (req, res) => {
+  try {
+    const chats = await Chat.find({ users: req.user.id }).select('_id');
+    const chatIds = chats.map(c => c._id);
+
+    const messages = await Message.find({
+      chat: { $in: chatIds },
+      hasLinks: true,
+      isDeletedForEveryone: false,
+      deletedFor: { $nin: [req.user.id] },
+    })
+      .populate('sender', 'name avatar')
+      .populate('chat', 'chatName isGroupChat')
+      .sort({ createdAt: -1 })
+
+    res.json(messages)
+  } catch (error) {
+    res.status(500).json({message : error.message})
+  }
+}
+
 const bulkDeleteForMe = async (req, res) => {
   try {
     const { messageIds } = req.body;
@@ -489,5 +555,5 @@ const bulkDeleteForEveryone = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, getMessageInfo, searchMessages, getMediaFiles, getDocuments, getLinks, bulkDeleteForMe, bulkDeleteForEveryone };
+module.exports = { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, getMessageInfo, searchMessages, getMediaFiles, getDocuments, getLinks, getAllMediaFiles, getAllDocs, getAllLinks,  bulkDeleteForMe, bulkDeleteForEveryone };
 
