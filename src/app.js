@@ -4,6 +4,7 @@ const authRoutes = require('./routes/auth.routes')
 const chatRoutes = require("./routes/chat.routes");
 const messageRoutes = require("./routes/message.routes");
 const callLogRoutes = require('./routes/callLogs.routes')
+const notificationRoutes = require('./routes/notification.routes')
 
 const app = express();
 const allowedOrigins = [
@@ -38,6 +39,7 @@ app.use("/api/auth", authRoutes)
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/call-logs", callLogRoutes);
+app.use("/api/notification", notificationRoutes);
 
 
 

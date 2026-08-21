@@ -2,6 +2,7 @@ const Chat = require('../../models/Chat.model')
 const User = require('../../models/User.model')
 const Message = require('../../models/Message.model')
 const crypto = require('crypto')
+const { createNotification } = require('../notification/notification.controller')
 
 // create new chat
 const accessChat = async (req, res) => {
@@ -297,8 +298,8 @@ const updateGroup = async (req, res) => {
         const io = req.app.get("io");
         io.to(chatId).emit("group_updated", updated);
 
+        const actor = await User.findById(currentUserId).select("name");
         if (nameChanged) {
-            const actor = await User.findById(currentUserId).select("name");
             const systemMsg = await Message.create({
                 chat: chatId,
                 sender: currentUserId,
@@ -310,6 +311,23 @@ const updateGroup = async (req, res) => {
             });
             io.to(chatId).emit("new_message", systemMsg);
         }
+
+        await Promise.all(
+            chat.users
+                .filter(id => id.toString() === currentUserId)
+                .map(id =>
+                    createNotification(
+                        req,
+                        'changes',
+                        chatId,
+                        memberId,
+                        currentUserId,
+                        "Group details Updated.",
+                        `${actor.name} upated the updated`
+                    )
+                )
+        )
+
 
         res.json(updated);
 
@@ -360,9 +378,12 @@ const addGroupMembers = async (req, res) => {
         newUsers.forEach((userId) => {
             io.to(userId.toString()).emit("added_to_group", updated);
         });
+
+
         io.to(chatId).emit("group_updated", updated);
         const actor = await User.findById(currentUserId).select("name");
         const addedUserNames = await User.find({ _id: { $in: newUsers } }).select("name");
+
 
         const systemMsg = await Message.create({
             chat: chatId,
@@ -373,6 +394,24 @@ const addGroupMembers = async (req, res) => {
             deliveredTo: [currentUserId],
             readBy: [currentUserId],
         });
+
+        await Promise.all(
+            chat.users
+                .filter(id => id.toString() === currentUserId)
+                .map(id =>
+                    createNotification(
+                        req,
+                        'alert',
+                        chatId,
+                        memberId,
+                        currentUserId,
+                        "New member added by admin",
+                        systemMsg.content
+                    )
+                )
+        )
+
+
 
         io.to(chatId).emit("new_message", systemMsg);
 
@@ -430,6 +469,23 @@ const removeGroupMember = async (req, res) => {
             deliveredTo: [currentUserId],
             readBy: [currentUserId],
         });
+
+        await Promise.all(
+            chat.users
+                .filter(id => id.toString() === currentUserId)
+                .map(id =>
+                    createNotification(
+                        req,
+                        'alert',
+                        chatId,
+                        memberId,
+                        currentUserId,
+                        `Member is removed by admin`,
+                        systemMsg.content
+                    )
+                )
+        )
+
 
         io.to(chatId).emit("new_message", systemMsg);
 
@@ -494,6 +550,24 @@ const leaveGroup = async (req, res) => {
             deliveredTo: [currentUserId],
             readBy: [currentUserId],
         });
+
+        await Promise.all(
+            chat.users
+                .filter(id => id.toString() === currentUserId)
+                .map(id =>
+                    createNotification(
+                        req,
+                        'alert',
+                        chatId,
+                        memberId,
+                        currentUserId,
+                        "Someone Just left a group",
+                        systemMsg.content
+                    )
+                )
+        )
+
+
         io.to(chatId).emit("new_message", systemMsg);
 
         res.json({ message: "Left group successfully" });
@@ -548,6 +622,22 @@ const makeAdmin = async (req, res) => {
             deliveredTo: [currentUserId],
             readBy: [currentUserId],
         });
+
+        await Promise.all(
+            chat.users
+                .filter(id => id.toString() === currentUserId)
+                .map(id =>
+                    createNotification(
+                        req,
+                        'alert',
+                        chatId,
+                        memberId,
+                        currentUserId,
+                        "New Admin has been apointed",
+                        systemMsg.content
+                    )
+                )
+        )
 
         io.to(chatId).emit("new_message", systemMsg);
 
@@ -604,6 +694,23 @@ const dismissAdmin = async (req, res) => {
             readBy: [currentUserId],
         });
 
+        await Promise.all(
+            chat.users
+                .filter(id => id.toString() === currentUserId)
+                .map(id =>
+                    createNotification(
+                        req,
+                        'alert',
+                        chatId,
+                        memberId,
+                        currentUserId,
+                        "Someone has been removed as admin",
+                        systemMsg.content
+                    )
+                )
+        )
+
+
         io.to(chatId).emit("new_message", systemMsg);
 
         res.json(updated);
@@ -656,7 +763,7 @@ const joinViaInviteLink = async (req, res) => {
         const { inviteLink } = req.params;
         const currentUserId = req.user.id;
         console.log(currentUserId);
-        
+
         const chat = await Chat.findOne({ inviteLink })
         if (!chat)
             return res.status(404).json({ message: "Invalid Invite Link" })
@@ -683,14 +790,31 @@ const joinViaInviteLink = async (req, res) => {
 
         const joiningUser = await User.findById(currentUserId).select("name");
         const systemMsg = await Message.create({
-            chat : chat._id,
-            sender : currentUserId,
-            type : "system",
-            systemAction : "member_added",
-            content : `${joiningUser.name} joined via Invite Link`,
-            deliveredTo : [currentUserId],
-            readBy : [currentUserId],
+            chat: chat._id,
+            sender: currentUserId,
+            type: "system",
+            systemAction: "member_added",
+            content: `${joiningUser.name} joined via Invite Link`,
+            deliveredTo: [currentUserId],
+            readBy: [currentUserId],
         });
+
+        await Promise.all(
+            chat.users
+                .filter(id => id.toString() === currentUserId)
+                .map(id =>
+                    createNotification(
+                        req,
+                        'alert',
+                        chat._id,
+                        memberId,
+                        currentUserId,
+                        "Someone has joined via Group Invite Link",
+                        systemMsg.content
+                    )
+                )
+        )
+
         const io = req.app.get('io');
         io.to(chat._id.toString()).emit("new_message", systemMsg);
         io.to(chat._id.toString()).emit("group_updated", fullChat);

@@ -3,11 +3,12 @@ const Chat = require("../../models/Chat.model");
 const User = require('../../models/User.model')
 const sendPushNotification = require('../../utils/sendPushNotification')
 const LinkifyIt = require("linkify-it");
+const { createNotification } = require("../notification/notification.controller");
 const linkify = new LinkifyIt();
 
 const sendMessage = async (req, res) => {
   try {
-    console.log("sendMessage body:", req.body);
+    // console.log("sendMessage body:", req.body);
     const { chatId, content, type, fileInfo, replyTo } = req.body;
     const currentUserId = req.user.id;
 
@@ -71,53 +72,66 @@ const sendMessage = async (req, res) => {
     });
     io.to(chatId.toString()).emit("new_message", fullMessage);
 
-    // ── Push Notifications ────────────────────────────────────────────────────
-    const onlineUsers = req.app.get("onlineUsers");
-    console.log("Online users:", [...(onlineUsers?.keys() || [])]);
-    console.log("Chat members:", fullChat.users.map(u => u._id.toString()));
+    // ── Notifications + Push ──────────────────────────────────────────────────
+    const onlineUsers = req.app.get("onlineUsers")
+    const activeChats = req.app.get("activeChats")
 
     for (const user of fullChat.users) {
-      if (user._id.toString() === currentUserId) {
-        console.log("Skipping sender:", user._id); continue;
-      }
-      if (onlineUsers?.has(user._id.toString())) {
-        console.log("Skipping online user:", user._id); continue;
-      }
+      // skip sender
+      if (user._id.toString() === currentUserId) continue
 
-      const member = await User.findById(user._id);
-      console.log("Member subscription:", member?.pushSubscription?.endpoint);
-      console.log("Member allowBrowserNotifications:", member?.allowBroswerNotifications);
+      // skiping if user is actively viewing THIS chat right now
+      const userActiveChat = activeChats?.get(user._id.toString())
+      if (userActiveChat === chatId.toString()) continue
 
-      if (!member?.pushSubscription?.endpoint) {
-        console.log("No subscription for:", user._id); continue;
-      }
-      if (!member.allowBroswerNotifications) {
-        console.log("Notifications off for:", user._id); continue;
-      }
+      const member = await User.findById(user._id)
+      if (!member) continue
 
       const setting = chat.userSettings.find(
         s => s.user.toString() === user._id.toString()
-      );
-      if (setting?.muted) continue;
+      )
 
-      await sendPushNotification(member.pushSubscription, {
-        title: chat.isGroupChat ? chat.chatName : req.user.name,
-        body: fileInfo
-          ? `${req.user.name} sent a file`
+      // skip if chat is muted by this member
+      if (setting?.muted) continue
+
+      const senderName = req.user.name
+      
+
+      await createNotification({
+        req,
+        notificationType: "message",
+        chat : chatId,
+        user: member?._id,          // ← named param
+        sender: currentUserId,
+        heading: 'Sent you an message',
+        content: fileInfo
+          ? `${senderName} sent a file`
           : chat.isGroupChat
-            ? `${req.user.name}: ${content?.slice(0, 60)}`
-            : content?.slice(0, 60),
-        icon: "/favicon.png",
-        badge: "/badge.png",
-        chatId: chatId.toString(),
-      });
+            ? `${senderName}: ${content?.slice(0, 60)}`
+            : content?.slice(0, 60)
+      })
+
+      const isOnline = onlineUsers?.has(user._id.toString())
+      if (!isOnline && member?.pushSubscription?.endpoint && member?.allowBrowserNotifications) {
+        await sendPushNotification(member.pushSubscription, {
+          title: chat.isGroupChat ? chat.chatName : req.user.name,
+          body: fileInfo
+            ? `${req.user.name} sent a file`
+            : chat.isGroupChat
+              ? `${req.user.name}: ${content?.slice(0, 60)}`
+              : content?.slice(0, 60),
+          icon: "/favicon.png",
+          badge: "/badge.png",
+          chatId: chatId.toString(),
+        })
+      }
     }
     // ─────────────────────────────────────────────────────────────────────────
 
     res.status(201).json(fullMessage);
 
   } catch (error) {
-    console.error("sendMessage CRASH:", error.message, error.stack);
+    console.error("sendMessage Err:", error.message, error.stack);
     res.status(500).json({ message: "Failed to send message" });
   }
 };
@@ -498,7 +512,7 @@ const getAllLinks = async (req, res) => {
 
     res.json(messages)
   } catch (error) {
-    res.status(500).json({message : error.message})
+    res.status(500).json({ message: error.message })
   }
 }
 
@@ -555,5 +569,5 @@ const bulkDeleteForEveryone = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, getMessageInfo, searchMessages, getMediaFiles, getDocuments, getLinks, getAllMediaFiles, getAllDocs, getAllLinks,  bulkDeleteForMe, bulkDeleteForEveryone };
+module.exports = { sendMessage, getMessages, markAsDelivered, markAsRead, editMessage, deleteForMe, deleteForEveryone, getMessageInfo, searchMessages, getMediaFiles, getDocuments, getLinks, getAllMediaFiles, getAllDocs, getAllLinks, bulkDeleteForMe, bulkDeleteForEveryone };
 
