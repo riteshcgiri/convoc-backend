@@ -47,12 +47,28 @@ const userSchema = new mongoose.Schema({
         default: "Welcom to my Profile. I am Bit shy don't hesitate to initiate conversation."
 
     },
-    status: {
-        type: String,
-        default: "offline",
+    onlineStatus: {
+        type: Boolean,
+        default: true,
     },
-    lastSeen: {
-        type: Date,
+    readReceipts : {
+        type: Boolean,
+        default: true,
+    },
+    lastSeenVisibility: {
+        type: String,
+        enum : ["everyone", "friends", "nobody"],
+    },
+    userLastSeen : {
+        type : Date
+    },
+    profilePhotoVisibility: {
+        type: String,
+        enum : ["everyone", "friends", "nobody"],
+    },
+    groupAddPermission: {
+        type: String,
+        enum : ["everyone", "friends", "nobody"],
     },
     otp: {
         type: String
