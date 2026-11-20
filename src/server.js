@@ -268,6 +268,12 @@ io.on("connection", (socket) => {
   socket.on("screen_share_started", relayScreenShare("screen_share_started"))
   socket.on("screen_share_stopped", relayScreenShare("screen_share_stopped"))
 
+  socket.on("camera_state", ({targetUserId, isOn}) => {
+    const callKey = [socket.userId, targetUserId].sort().join("_")
+    if(!activeCalls.get(callKey)?.startedAt) return
+    io.to(targetUserId).emit("camera_state", {userId : socket.userId, isOn})
+  })
+
   socket.on("call_ended", async ({ targetUserId }) => {
     const callKey = [socket.userId, targetUserId].sort().join("_")
     const call = activeCalls.get(callKey)
